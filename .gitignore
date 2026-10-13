@@ -1,0 +1,24 @@
+# secrets and environment
+.venv/
+.env
+.claude/
+
+# caches
+.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# downloaded data (recreate with: python -m scripts.download_data)
+data/*
+!data/parsed_api.json
+!data/parsed_local.json
+!data/eval_set*.json
+
+# raw run outputs, keep the write-up
+results/*
+!results/REPORT*.md
+!results/summary*.md
+!results/significance*.md
+!results/BUILD_LOG.md
+!results/FREEZE.txt

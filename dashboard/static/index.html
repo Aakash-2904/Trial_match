@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrialMatch</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M9 17l5 5 9-11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M9 17l5 5 9-11"/></svg>
+    <div>
+      <div class="brand-name">TrialMatch</div>
+      <div class="brand-sub">Multi-agent clinical trial screening</div>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="screen" aria-selected="true">Screen a patient</button>
+    <button role="tab" data-view="eval" aria-selected="false">Evaluation</button>
+    <button role="tab" data-view="about" aria-selected="false">How it works</button>
+  </nav>
+  <div class="topbar-right">
+    <span class="privacy-pill" title="Patient notes are processed only by the local model on this machine">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l5 2v4c0 3.2-2.1 5.8-5 7-2.9-1.2-5-3.8-5-7v-4z"/></svg>
+      <span>On-device · <b id="model-name">…</b></span>
+    </span>
+    <button class="icon-btn" id="theme-btn" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1.5v9a4.5 4.5 0 010-9z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main>
+<!-- ================= SCREEN ================= -->
+<section id="view-screen" class="view active">
+  <div class="screen-grid">
+    <aside class="left-col">
+      <div class="card">
+        <div class="card-head">
+          <h2>Patient note</h2>
+          <div class="seg" role="group" aria-label="Note view">
+            <button data-noteview="edit" class="on">Edit</button>
+            <button data-noteview="read" id="noteview-read" disabled>Evidence</button>
+          </div>
+        </div>
+        <textarea id="note" rows="9" spellcheck="false" placeholder="Paste a free-text patient description…"></textarea>
+        <div id="note-read" class="note-read" hidden></div>
+        <div class="row between small muted">
+          <label class="inline">Example
+            <select id="example"></select>
+          </label>
+          <span id="note-count">0 words</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Settings</h2>
+        <label class="field">Trial snapshot
+          <select id="snapshot"></select>
+        </label>
+        <label class="field">
+          <span class="row between"><span>Trials to screen</span><b id="topk-val">8</b></span>
+          <input type="range" id="topk" min="3" max="20" value="8">
+          <span class="hint" id="topk-hint">About 1–3 min per trial on a laptop CPU</span>
+        </label>
+        <label class="switch"><input type="checkbox" id="critic" checked><span class="track"></span>
+          <span><b>Critic agent</b><br><span class="hint">Re-reads the note and challenges every exclusion</span></span></label>
+        <label class="switch"><input type="checkbox" id="rag" checked><span class="track"></span>
+          <span><b>RAG</b><br><span class="hint" id="rag-hint">Hybrid search + medical knowledge cards</span></span></label>
+        <div class="actions">
+          <button class="btn primary" id="run-btn">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>Find trials</button>
+          <button class="btn" id="cancel-btn" hidden>Stop</button>
+        </div>
+        <div id="form-msg" class="form-msg" role="status"></div>
+      </div>
+
+      <div class="card" id="profile-card" hidden>
+        <div class="card-head"><h2>Extracted profile</h2><span class="small muted">hover a fact to see its source</span></div>
+        <div id="profile"></div>
+      </div>
+    </aside>
+
+    <div class="right-col">
+      <div class="card pipeline-card" id="pipeline-card">
+        <div class="card-head">
+          <h2>Agent pipeline</h2>
+          <span id="run-status" class="small muted">Idle</span>
+        </div>
+        <ol class="pipeline" id="pipeline">
+          <li data-node="profiler"><span class="dot"></span><b>Profiler</b><small>local LLM</small></li>
+          <li data-node="prefilter"><span class="dot"></span><b>Pre-filter</b><small>rules + retrieval</small></li>
+          <li data-node="rule_checker"><span class="dot"></span><b>Rule checker</b><small>numeric rules</small></li>
+          <li data-node="eligibility_checker"><span class="dot"></span><b>Eligibility</b><small>local LLM</small></li>
+          <li data-node="critic"><span class="dot"></span><b>Critic</b><small>local LLM</small></li>
+          <li data-node="scorer"><span class="dot"></span><b>Scorer</b><small>rules</small></li>
+        </ol>
+        <div class="progress" id="progress" hidden>
+          <div class="progress-bar"><div id="progress-fill"></div></div>
+          <div class="row between small"><span id="progress-text"></span><span id="progress-eta" class="muted"></span></div>
+        </div>
+        <details class="log" id="log-wrap">
+          <summary>Activity log <span id="log-count" class="muted"></span></summary>
+          <ol id="log"></ol>
+        </details>
+      </div>
+
+      <div id="results-wrap">
+        <div class="empty" id="empty-state">
+          <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="12" y="8" width="40" height="48" rx="6"/><path d="M22 22h20M22 31h20M22 40h12"/></svg>
+          <h3>No screening yet</h3>
+          <p>Enter a patient note and press <b>Find trials</b>. Each candidate trial is checked criterion by criterion,
+            and every decision links back to the sentence in the note that supports it.</p>
+          <p class="small muted">Or open a saved evaluation run from the <a href="#" data-goto="eval">Evaluation</a> tab to browse results instantly.</p>
+        </div>
+        <div id="results-head" class="results-head" hidden>
+          <div>
+            <h2 id="results-title">Results</h2>
+            <div id="results-sub" class="small muted"></div>
+          </div>
+          <div class="row gap">
+            <div class="seg" role="group" aria-label="Filter by label" id="label-filter">
+              <button data-f="all" class="on">All <span></span></button>
+              <button data-f="likely_eligible">Eligible <span></span></button>
+              <button data-f="possibly_eligible">Review <span></span></button>
+              <button data-f="likely_ineligible">Ineligible <span></span></button>
+            </div>
+            <button class="btn small" id="export-btn">Export JSON</button>
+          </div>
+        </div>
+        <div id="results"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= EVALUATION ================= -->
+<section id="view-eval" class="view">
+  <div class="filter-row">
+    <label class="inline">Run <select id="run-select"></select></label>
+    <label class="inline">Metric
+      <select id="metric-select">
+        <option value="ndcg@10">nDCG@10</option>
+        <option value="p@5">P@5</option>
+        <option value="elig_acc">Eligible-vs-excluded accuracy</option>
+      </select>
+    </label>
+    <span class="small muted" id="eval-sub"></span>
+  </div>
+  <div class="tiles" id="tiles"></div>
+  <div class="eval-grid">
+    <div class="card">
+      <div class="card-head"><h2>Systems compared</h2><span class="small muted">mean over patients, 0–1, higher is better</span></div>
+      <div id="chart-metrics" class="multiples"></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Per patient</h2><span class="small muted" id="heat-sub"></span></div>
+      <div id="heat" class="table-wrap"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head">
+      <h2>Rankings</h2>
+      <label class="inline small">Patient <select id="topic-select"></select></label>
+    </div>
+    <div class="legend-row small">
+      <span><i class="qk q2"></i>Eligible (qrel 2)</span>
+      <span><i class="qk q1"></i>Excluded (qrel 1)</span>
+      <span><i class="qk q0"></i>Not relevant (qrel 0)</span>
+    </div>
+    <div id="rankings" class="rankings"></div>
+  </div>
+  <div class="card" id="sig-card" hidden>
+    <div class="card-head"><h2>Significance tests</h2></div>
+    <div id="sig"></div>
+  </div>
+</section>
+
+<!-- ================= ABOUT ================= -->
+<section id="view-about" class="view">
+  <div class="about">
+    <div class="card">
+      <h2>Two privacy tiers, enforced in code</h2>
+      <p>Everything that sees a patient note runs on this machine through Ollama. A cloud model is used only to parse
+        <em>public</em> trial registry text into atomic criteria, and the type system stops patient data from reaching it
+        (<code>llm_public.py</code>, checked by <code>tests/test_privacy.py</code>).</p>
+      <div id="arch"></div>
+    </div>
+    <div class="card">
+      <h2>Agents</h2>
+      <div class="table-wrap"><table class="tbl">
+        <thead><tr><th>Agent</th><th>Tier</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>Patient profiler</td><td><span class="tier local">local LLM</span></td><td>Note → structured profile; every fact grounded in a quoted span</td></tr>
+          <tr><td>Criteria parser</td><td><span class="tier public">cloud API · public text</span></td><td>Eligibility text → atomic criteria with numeric checks (offline, ahead of time)</td></tr>
+          <tr><td>Pre-filter</td><td><span class="tier rules">rules</span></td><td>BM25 or hybrid relevance; age/sex from registry fields</td></tr>
+          <tr><td>Rule checker</td><td><span class="tier rules">rules</span></td><td>Evaluates numeric criteria (labs, age) with no LLM</td></tr>
+          <tr><td>Eligibility checker</td><td><span class="tier local">local LLM</span></td><td>Judges the remaining fuzzy criteria; answers must quote the note</td></tr>
+          <tr><td>Critic</td><td><span class="tier local">local LLM</span></td><td>Re-reads the note and challenges every exclusion</td></tr>
+          <tr><td>Scorer</td><td><span class="tier rules">rules</span></td><td>Label, score and plain-language explanation</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <h2>Reading the results</h2>
+      <ul class="plain">
+        <li><span class="status good">✓</span> <b>Met</b>: the note supports the criterion being satisfied (for exclusions: the patient does <em>not</em> have it).</li>
+        <li><span class="status critical">✕</span> <b>Not met</b>: the note contradicts it, with a quoted span as evidence.</li>
+        <li><span class="status neutral">?</span> <b>Unknown</b>: the note doesn't say. These are what a coordinator would check by hand.</li>
+      </ul>
+      <p class="small muted">Research prototype. Not for clinical use.</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
